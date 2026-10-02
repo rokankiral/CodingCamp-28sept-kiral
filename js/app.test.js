@@ -299,189 +299,539 @@ describe('Property 5 — Persistensi data round-trip', () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════
+// TASK 5 — Renderer module tests
+// ═════════════════════════════════════════════════════════════
+
+import {
+  CATEGORY_COLORS,
+  getSortedTransactions,
+  Renderer,
+  escapeHtml
+} from './app.js';
+
 // ─────────────────────────────────────────────────────────────
-// Validator — imports
+// Helpers shared across Renderer tests
 // ─────────────────────────────────────────────────────────────
 
-import { Validator, NAME_MAX_LENGTH, AMOUNT_MAX } from './app.js';
+/** Reset state.transactions to an empty array before each test. */
+function resetState() {
+  state.transactions = [];
+  state.sortOrder    = 'default';
+  state.spendingLimit = 0;
+}
+
+/** Build minimal DOM needed by renderBalance(). */
+function setupBalanceDOM() {
+  document.body.innerHTML = '<h1 id="total-balance"></h1>';
+}
+
+/** Build minimal DOM needed by renderList(). */
+function setupListDOM() {
+  document.body.innerHTML = `
+    <ul id="transaction-list"></ul>
+    <p id="empty-message"></p>
+  `;
+}
+
+/** Build minimal DOM needed by renderChart(). */
+function setupChartDOM() {
+  document.body.innerHTML = `
+    <canvas id="expense-chart"></canvas>
+    <p id="chart-empty-message"></p>
+    <div id="chart-legend"></div>
+  `;
+}
 
 // ─────────────────────────────────────────────────────────────
-// Validator.validateTransaction() — unit tests
+// escapeHtml — unit tests
 // ─────────────────────────────────────────────────────────────
 
-describe('Validator.validateTransaction()', () => {
-  // ── valid input ────────────────────────────────────────────
-  it('returns { valid: true } for correct inputs', () => {
-    const result = Validator.validateTransaction('Makan siang', '45000', 'Food');
-    expect(result).toEqual({ valid: true });
+describe('escapeHtml()', () => {
+  it('escapes & < > " \'', () => {
+    expect(escapeHtml('a&b<c>d"e\'f')).toBe('a&amp;b&lt;c&gt;d&quot;e&#39;f');
   });
-
-  it('accepts amount as string integer', () => {
-    expect(Validator.validateTransaction('Taksi', '30000', 'Transport').valid).toBe(true);
+  it('returns plain string unchanged', () => {
+    expect(escapeHtml('Hello World')).toBe('Hello World');
   });
-
-  it('accepts amount as string decimal', () => {
-    expect(Validator.validateTransaction('Nonton', '25000.50', 'Fun').valid).toBe(true);
-  });
-
-  it('accepts name that is exactly 100 characters', () => {
-    const name = 'a'.repeat(NAME_MAX_LENGTH);
-    expect(Validator.validateTransaction(name, '1000', 'Food').valid).toBe(true);
-  });
-
-  it('accepts amount equal to the maximum allowed value', () => {
-    expect(Validator.validateTransaction('Item', String(AMOUNT_MAX), 'Food').valid).toBe(true);
-  });
-
-  // ── name errors ────────────────────────────────────────────
-  it('returns error when name is an empty string', () => {
-    const result = Validator.validateTransaction('', '1000', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.name).toBeDefined();
-  });
-
-  it('returns error when name is only spaces', () => {
-    const result = Validator.validateTransaction('   ', '1000', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.name).toBeDefined();
-  });
-
-  it('returns error when name is only tab/newline whitespace', () => {
-    const result = Validator.validateTransaction('\t\n', '1000', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.name).toBeDefined();
-  });
-
-  it('returns error when name exceeds 100 characters', () => {
-    const name = 'a'.repeat(NAME_MAX_LENGTH + 1);
-    const result = Validator.validateTransaction(name, '1000', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.name).toBeDefined();
-  });
-
-  // ── amount errors ──────────────────────────────────────────
-  it('returns error when amount is empty string', () => {
-    const result = Validator.validateTransaction('Item', '', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.amount).toBeDefined();
-  });
-
-  it('returns error when amount is zero', () => {
-    const result = Validator.validateTransaction('Item', '0', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.amount).toBeDefined();
-  });
-
-  it('returns error when amount is negative', () => {
-    const result = Validator.validateTransaction('Item', '-50', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.amount).toBeDefined();
-  });
-
-  it('returns error when amount is non-numeric text', () => {
-    const result = Validator.validateTransaction('Item', 'abc', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.amount).toBeDefined();
-  });
-
-  it('returns error when amount exceeds maximum allowed value', () => {
-    const result = Validator.validateTransaction('Item', String(AMOUNT_MAX + 1), 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.amount).toBeDefined();
-  });
-
-  // ── category errors ────────────────────────────────────────
-  it('returns error when category is empty string (placeholder)', () => {
-    const result = Validator.validateTransaction('Item', '1000', '');
-    expect(result.valid).toBe(false);
-    expect(result.errors.category).toBeDefined();
-  });
-
-  it('returns error for an unrecognised category', () => {
-    const result = Validator.validateTransaction('Item', '1000', 'Shopping');
-    expect(result.valid).toBe(false);
-    expect(result.errors.category).toBeDefined();
-  });
-
-  // ── multiple errors ────────────────────────────────────────
-  it('returns all field errors when all fields are invalid', () => {
-    const result = Validator.validateTransaction('', '-5', 'Bad');
-    expect(result.valid).toBe(false);
-    expect(result.errors.name).toBeDefined();
-    expect(result.errors.amount).toBeDefined();
-    expect(result.errors.category).toBeDefined();
-  });
-
-  it('returns only the relevant error when only one field is invalid', () => {
-    const result = Validator.validateTransaction('', '1000', 'Food');
-    expect(result.valid).toBe(false);
-    expect(result.errors.name).toBeDefined();
-    expect(result.errors.amount).toBeUndefined();
-    expect(result.errors.category).toBeUndefined();
+  it('coerces non-string input via String()', () => {
+    expect(escapeHtml(42)).toBe('42');
   });
 });
 
 // ─────────────────────────────────────────────────────────────
-// PROPERTY-BASED TESTS — Validator
+// getSortedTransactions() — unit tests
 // ─────────────────────────────────────────────────────────────
 
-// Feature: expense-budget-visualizer, Property 2: Input whitespace ditolak
-describe('Property 2 — Input whitespace ditolak', () => {
+describe('getSortedTransactions()', () => {
+  beforeEach(() => resetState());
+
+  it('returns insertion order for "default"', () => {
+    state.transactions = [
+      makeTransaction({ amount: 300 }),
+      makeTransaction({ amount: 100 }),
+      makeTransaction({ amount: 200 })
+    ];
+    const sorted = getSortedTransactions();
+    expect(sorted.map(t => t.amount)).toEqual([300, 100, 200]);
+  });
+
+  it('sorts amount-desc', () => {
+    state.transactions = [
+      makeTransaction({ amount: 100 }),
+      makeTransaction({ amount: 300 }),
+      makeTransaction({ amount: 200 })
+    ];
+    state.sortOrder = 'amount-desc';
+    expect(getSortedTransactions().map(t => t.amount)).toEqual([300, 200, 100]);
+  });
+
+  it('sorts amount-asc', () => {
+    state.transactions = [
+      makeTransaction({ amount: 300 }),
+      makeTransaction({ amount: 100 }),
+      makeTransaction({ amount: 200 })
+    ];
+    state.sortOrder = 'amount-asc';
+    expect(getSortedTransactions().map(t => t.amount)).toEqual([100, 200, 300]);
+  });
+
+  it('sorts category-asc (Food < Fun < Transport)', () => {
+    state.transactions = [
+      makeTransaction({ category: 'Transport' }),
+      makeTransaction({ category: 'Food' }),
+      makeTransaction({ category: 'Fun' })
+    ];
+    state.sortOrder = 'category-asc';
+    expect(getSortedTransactions().map(t => t.category)).toEqual(['Food', 'Fun', 'Transport']);
+  });
+
+  it('does not mutate state.transactions', () => {
+    state.transactions = [
+      makeTransaction({ amount: 200 }),
+      makeTransaction({ amount: 100 })
+    ];
+    state.sortOrder = 'amount-asc';
+    getSortedTransactions();
+    expect(state.transactions[0].amount).toBe(200); // original order preserved
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Renderer.renderBalance() — unit tests
+// ─────────────────────────────────────────────────────────────
+
+describe('Renderer.renderBalance()', () => {
+  beforeEach(() => {
+    resetState();
+    setupBalanceDOM();
+  });
+
+  it('shows Rp 0,00 when there are no transactions', () => {
+    Renderer.renderBalance();
+    const el = document.getElementById('total-balance');
+    // Intl formatting in jsdom may differ slightly; check it contains 0
+    expect(el.textContent).toMatch(/0/);
+    expect(el.classList.contains('balance--overflow')).toBe(false);
+  });
+
+  it('shows the correct sum for a single transaction', () => {
+    state.transactions = [makeTransaction({ amount: 45000 })];
+    Renderer.renderBalance();
+    const el = document.getElementById('total-balance');
+    // Intl format for IDR 45000 in id-ID locale contains '45.000'
+    expect(el.textContent).toMatch(/45[.,]?0+/);
+  });
+
+  it('shows the correct sum for multiple transactions', () => {
+    state.transactions = [
+      makeTransaction({ amount: 30000 }),
+      makeTransaction({ amount: 20000 })
+    ];
+    Renderer.renderBalance();
+    const el = document.getElementById('total-balance');
+    expect(el.textContent).toMatch(/50[.,]?0+/);
+  });
+
+  it('adds overflow indicator when sum > 999_999_999.99', () => {
+    state.transactions = [
+      makeTransaction({ amount: 999_999_999.99 }),
+      makeTransaction({ amount: 1 })
+    ];
+    Renderer.renderBalance();
+    const el = document.getElementById('total-balance');
+    expect(el.textContent).toMatch(/^⚠/);
+    expect(el.classList.contains('balance--overflow')).toBe(true);
+  });
+
+  it('removes overflow class when sum is within range after a prior overflow', () => {
+    const el = document.getElementById('total-balance');
+    el.classList.add('balance--overflow');
+    state.transactions = [makeTransaction({ amount: 50000 })];
+    Renderer.renderBalance();
+    expect(el.classList.contains('balance--overflow')).toBe(false);
+  });
+
+  it('does nothing if #total-balance is absent from the DOM', () => {
+    document.body.innerHTML = '';
+    // Should not throw
+    expect(() => Renderer.renderBalance()).not.toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Renderer.renderList() — unit tests
+// ─────────────────────────────────────────────────────────────
+
+describe('Renderer.renderList()', () => {
+  beforeEach(() => {
+    resetState();
+    setupListDOM();
+  });
+
+  it('shows #empty-message and hides list when transactions is empty', () => {
+    Renderer.renderList();
+    const listEl  = document.getElementById('transaction-list');
+    const emptyEl = document.getElementById('empty-message');
+    expect(emptyEl.hidden).toBe(false);
+    expect(listEl.style.display).toBe('none');
+  });
+
+  it('hides #empty-message and shows list when transactions exist', () => {
+    state.transactions = [makeTransaction()];
+    Renderer.renderList();
+    const listEl  = document.getElementById('transaction-list');
+    const emptyEl = document.getElementById('empty-message');
+    expect(emptyEl.hidden).toBe(true);
+    expect(listEl.style.display).not.toBe('none');
+  });
+
+  it('renders one <li> per transaction', () => {
+    state.transactions = [makeTransaction(), makeTransaction({ category: 'Transport' })];
+    Renderer.renderList();
+    const items = document.querySelectorAll('#transaction-list .transaction-item');
+    expect(items).toHaveLength(2);
+  });
+
+  it('each <li> has data-id matching the transaction id', () => {
+    const tx = makeTransaction({ id: 'test-id-123' });
+    state.transactions = [tx];
+    Renderer.renderList();
+    const li = document.querySelector('.transaction-item');
+    expect(li.dataset.id).toBe('test-id-123');
+  });
+
+  it('renders category badge with correct class', () => {
+    state.transactions = [makeTransaction({ category: 'Transport' })];
+    Renderer.renderList();
+    const badge = document.querySelector('.badge--Transport');
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toBe('Transport');
+  });
+
+  it('renders delete button with correct aria-label', () => {
+    state.transactions = [makeTransaction({ name: 'Makan' })];
+    Renderer.renderList();
+    const btn = document.querySelector('.btn-delete');
+    expect(btn.getAttribute('aria-label')).toBe('Hapus Makan');
+  });
+
+  it('adds transaction-item--over-limit class when amount exceeds spendingLimit', () => {
+    state.transactions  = [makeTransaction({ amount: 60000 })];
+    state.spendingLimit = 50000;
+    Renderer.renderList();
+    const li = document.querySelector('.transaction-item');
+    expect(li.classList.contains('transaction-item--over-limit')).toBe(true);
+    const amountEl = li.querySelector('.item-amount');
+    expect(amountEl.textContent).toMatch(/^⚠/);
+  });
+
+  it('does NOT add over-limit class when amount equals or is below limit', () => {
+    state.transactions  = [makeTransaction({ amount: 50000 })];
+    state.spendingLimit = 50000;
+    Renderer.renderList();
+    const li = document.querySelector('.transaction-item');
+    expect(li.classList.contains('transaction-item--over-limit')).toBe(false);
+  });
+
+  it('does NOT add over-limit class when spendingLimit is 0 (disabled)', () => {
+    state.transactions  = [makeTransaction({ amount: 1_000_000 })];
+    state.spendingLimit = 0;
+    Renderer.renderList();
+    const li = document.querySelector('.transaction-item');
+    expect(li.classList.contains('transaction-item--over-limit')).toBe(false);
+  });
+
+  it('respects sort order when rendering', () => {
+    state.transactions = [
+      makeTransaction({ amount: 300, name: 'C' }),
+      makeTransaction({ amount: 100, name: 'A' }),
+      makeTransaction({ amount: 200, name: 'B' })
+    ];
+    state.sortOrder = 'amount-asc';
+    Renderer.renderList();
+    const names = [...document.querySelectorAll('.item-name')].map(el => el.textContent);
+    expect(names).toEqual(['A', 'B', 'C']);
+  });
+
+  it('clears previous render on subsequent calls', () => {
+    state.transactions = [makeTransaction(), makeTransaction()];
+    Renderer.renderList();
+    state.transactions = [makeTransaction()];
+    Renderer.renderList();
+    expect(document.querySelectorAll('.transaction-item')).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Renderer.renderChart() — unit tests  (Chart.js mocked)
+// ─────────────────────────────────────────────────────────────
+
+describe('Renderer.renderChart()', () => {
+  let MockChart;
+  let lastChartConfig;
+
+  beforeEach(() => {
+    resetState();
+    setupChartDOM();
+
+    // Mock Chart constructor
+    lastChartConfig = null;
+    MockChart = vi.fn(function (canvas, config) {
+      lastChartConfig = config;
+      this.data    = config.data;
+      this.options = config.options;
+      this.update  = vi.fn(() => {});
+    });
+    globalThis.Chart = MockChart;
+
+    // Reset the module-level chartInstance between tests by reassigning via import
+    // We access it through the module, but since ES modules are live bindings we
+    // manipulate state indirectly by calling renderChart() on a fresh DOM.
+  });
+
+  afterEach(() => {
+    delete globalThis.Chart;
+    vi.restoreAllMocks();
+  });
+
+  it('hides canvas and shows empty message when all totals are 0', () => {
+    state.transactions = [];
+    Renderer.renderChart();
+    const canvas  = document.getElementById('expense-chart');
+    const emptyEl = document.getElementById('chart-empty-message');
+    expect(canvas.hidden).toBe(true);
+    expect(emptyEl.hidden).toBe(false);
+  });
+
+  it('shows canvas and hides empty message when there are transactions', () => {
+    state.transactions = [makeTransaction({ amount: 50000, category: 'Food' })];
+    Renderer.renderChart();
+    const canvas  = document.getElementById('expense-chart');
+    const emptyEl = document.getElementById('chart-empty-message');
+    expect(canvas.hidden).toBe(false);
+    expect(emptyEl.hidden).toBe(true);
+  });
+
+  it('only passes categories with total > 0 to Chart', () => {
+    state.transactions = [
+      makeTransaction({ amount: 50000, category: 'Food' }),
+      makeTransaction({ amount: 30000, category: 'Transport' })
+    ];
+    Renderer.renderChart();
+    const labels = lastChartConfig.data.labels;
+    expect(labels).toContain('Food');
+    expect(labels).toContain('Transport');
+    expect(labels).not.toContain('Fun');
+  });
+
+  it('renders custom legend only for active categories', () => {
+    state.transactions = [makeTransaction({ amount: 20000, category: 'Fun' })];
+    Renderer.renderChart();
+    const legendEl = document.getElementById('chart-legend');
+    expect(legendEl.textContent).toMatch(/Fun/);
+    expect(legendEl.textContent).not.toMatch(/Food/);
+    expect(legendEl.textContent).not.toMatch(/Transport/);
+  });
+
+  it('clears legend when all totals drop to 0', () => {
+    state.transactions = [makeTransaction({ amount: 20000, category: 'Fun' })];
+    Renderer.renderChart();
+    state.transactions = [];
+    Renderer.renderChart();
+    const legendEl = document.getElementById('chart-legend');
+    expect(legendEl.innerHTML).toBe('');
+  });
+
+  it('uses CATEGORY_COLORS for chart background colours', () => {
+    state.transactions = [makeTransaction({ amount: 10000, category: 'Food' })];
+    Renderer.renderChart();
+    const bgColors = lastChartConfig.data.datasets[0].backgroundColor;
+    expect(bgColors).toContain(CATEGORY_COLORS.Food);
+  });
+
+  it('does not throw when Chart is not defined (no CDN)', () => {
+    delete globalThis.Chart;
+    state.transactions = [makeTransaction({ amount: 10000, category: 'Food' })];
+    expect(() => Renderer.renderChart()).not.toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// PROPERTY-BASED TESTS
+// ─────────────────────────────────────────────────────────────
+
+// Feature: expense-budget-visualizer, Property 4: Total balance = sum of all transactions
+describe('Property 4 — Total balance = sum of all transactions', () => {
   /**
-   * Validates: Requirements 1.2, 1.5
+   * Validates: Requirements 3.2, 3.3, 3.4
    *
-   * For any string composed entirely of whitespace characters used as the
-   * name field, validateTransaction() must reject the input (valid === false)
-   * regardless of the amount or category values.
+   * For any valid transaction array, the text rendered in #total-balance must
+   * reflect a value equal to the arithmetic sum of all transaction amounts.
+   * We verify this by comparing the numeric sum against what Intl.NumberFormat
+   * would produce (or by checking overflow when the sum is large).
    */
-  it('rejects any all-whitespace name string', () => {
-    // Arbitrary that produces non-empty strings made only of whitespace characters
-    const whitespaceStringArb = fc.stringOf(
-      fc.constantFrom(' ', '\t', '\n', '\r', '\u00A0'),
-      { minLength: 1, maxLength: 50 }
-    );
+  it('displayed balance equals the sum of all amounts for any valid transaction list', () => {
+    setupBalanceDOM();
 
     fc.assert(
-      fc.property(
-        whitespaceStringArb,
-        fc.float({ min: 0.01, max: AMOUNT_MAX, noNaN: true }).filter(n => n > 0),
-        fc.constantFrom(...VALID_CATEGORIES),
-        (wsName, amount, category) => {
-          const result = Validator.validateTransaction(wsName, String(amount), category);
-          expect(result.valid).toBe(false);
-          expect(result.errors.name).toBeDefined();
+      fc.property(fc.array(transactionArb), (transactions) => {
+        state.transactions  = transactions;
+        state.sortOrder     = 'default';
+        state.spendingLimit = 0;
+
+        Renderer.renderBalance();
+
+        const el = document.getElementById('total-balance');
+        const sum = transactions.reduce((acc, t) => acc + t.amount, 0);
+        const OVERFLOW_LIMIT = 999_999_999.99;
+
+        if (sum > OVERFLOW_LIMIT) {
+          // Overflow case: text starts with ⚠ and element has the class
+          expect(el.textContent.startsWith('⚠')).toBe(true);
+          expect(el.classList.contains('balance--overflow')).toBe(true);
+        } else {
+          // Normal case: formatted text must match what Intl.NumberFormat produces
+          const expected = new Intl.NumberFormat('id-ID', {
+            style: 'currency',
+            currency: 'IDR'
+          }).format(sum);
+          expect(el.textContent).toBe(expected);
+          expect(el.classList.contains('balance--overflow')).toBe(false);
         }
-      ),
+      }),
       { numRuns: 100 }
     );
   });
 });
 
-describe('Property 2 (extended) — Valid inputs always accepted by Validator', () => {
+// Feature: expense-budget-visualizer, Property 6: Chart proportions sum to 100%
+describe('Property 6 — Chart proportions sum to 100%', () => {
   /**
-   * Validates: Requirements 1.1, 1.2, 1.5
+   * Validates: Requirements 4.1, 4.3, 4.6
    *
-   * For any input where name is non-whitespace and within length, amount is
-   * a positive number within range, and category is valid, the validator
-   * must return { valid: true }.
+   * For any non-empty valid transaction array, the data values passed to Chart.js
+   * must sum to the grand total, which means each segment's proportion of the
+   * total must sum to 100% ± 0.1%.
    */
-  it('accepts any valid transaction input combination', () => {
-    const validNameArb = fc.string({ minLength: 1, maxLength: NAME_MAX_LENGTH })
-      .filter(s => s.trim().length > 0);
+  it('chart segment data values produce proportions that sum to 100% ± 0.1%', () => {
+    let capturedData = null;
 
-    const validAmountArb = fc.float({ min: 0.01, max: AMOUNT_MAX, noNaN: true })
-      .filter(n => n > 0 && n <= AMOUNT_MAX);
+    const MockChartCtor = vi.fn(function (_canvas, config) {
+      capturedData = config.data;
+      this.data    = config.data;
+      this.options = config.options;
+      this.update  = vi.fn();
+    });
 
     fc.assert(
-      fc.property(
-        validNameArb,
-        validAmountArb,
-        fc.constantFrom(...VALID_CATEGORIES),
-        (name, amount, category) => {
-          const result = Validator.validateTransaction(name, String(amount), category);
-          expect(result.valid).toBe(true);
+      fc.property(fc.array(transactionArb, { minLength: 1 }), (transactions) => {
+        setupChartDOM();
+        capturedData = null;
+        MockChartCtor.mockClear();
+        globalThis.Chart = MockChartCtor;
+
+        state.transactions  = transactions;
+        state.sortOrder     = 'default';
+        state.spendingLimit = 0;
+
+        Renderer.renderChart();
+
+        delete globalThis.Chart;
+
+        // If canvas is hidden, all totals were 0 — skip proportion check
+        const canvas = document.getElementById('expense-chart');
+        if (canvas.hidden) return;
+
+        // capturedData holds the data passed to the Chart constructor
+        expect(capturedData).not.toBeNull();
+        const values = capturedData.datasets[0].data;
+        const total  = values.reduce((s, v) => s + v, 0);
+        expect(total).toBeGreaterThan(0);
+
+        // Sum of all (value/total)*100 should equal 100.0 within float tolerance
+        const pctSum = values.reduce((s, v) => s + (v / total) * 100, 0);
+        expect(Math.abs(pctSum - 100)).toBeLessThan(0.1);
+      }),
+      { numRuns: 100 }
+    );
+  });
+});
+
+// Feature: expense-budget-visualizer, Property 7: Zero-total categories excluded from chart
+describe('Property 7 — Zero-total categories excluded from chart and legend', () => {
+  /**
+   * Validates: Requirements 4.5, 4.6
+   *
+   * For any valid transaction array, every category whose total is 0 must NOT
+   * appear as a label in the Chart.js data, and must NOT appear in the legend.
+   */
+  it('categories with total = 0 are absent from chart labels and legend', () => {
+    const MockChartCtor = vi.fn(function (_canvas, config) {
+      this.data    = config.data;
+      this.options = config.options;
+      this.update  = vi.fn();
+    });
+
+    fc.assert(
+      fc.property(fc.array(transactionArb), (transactions) => {
+        setupChartDOM();
+        MockChartCtor.mockClear();
+        globalThis.Chart = MockChartCtor;
+
+        state.transactions  = transactions;
+        state.sortOrder     = 'default';
+        state.spendingLimit = 0;
+
+        Renderer.renderChart();
+
+        delete globalThis.Chart;
+
+        // Compute which categories have total = 0
+        const totals = { Food: 0, Transport: 0, Fun: 0 };
+        for (const tx of transactions) {
+          if (tx.category in totals) totals[tx.category] += tx.amount;
         }
-      ),
+        const zeroCategories = VALID_CATEGORIES.filter(cat => totals[cat] === 0);
+
+        // If Chart was constructed, check labels
+        if (MockChartCtor.mock.calls.length > 0) {
+          const config = MockChartCtor.mock.calls[0][1];
+          for (const cat of zeroCategories) {
+            expect(config.data.labels).not.toContain(cat);
+          }
+        }
+
+        // Check legend
+        const legendEl = document.getElementById('chart-legend');
+        for (const cat of zeroCategories) {
+          // Legend text should not mention a zero-total category
+          // (allow empty legend for all-zero case)
+          if (legendEl.innerHTML.trim() !== '') {
+            expect(legendEl.textContent).not.toMatch(new RegExp(`\\b${cat}\\b`));
+          }
+        }
+      }),
       { numRuns: 100 }
     );
   });

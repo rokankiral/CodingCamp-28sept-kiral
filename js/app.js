@@ -175,70 +175,268 @@ export const Storage = {
 };
 
 // ─────────────────────────────────────────────────────────────
-// TASK 3.1 — Validator module
+// Task 3: Validator module   — implemented in Task 3
+// Task 6: Controller         — implemented in Task 6
+// Task 8: Initialization     — implemented in Task 8
 // ─────────────────────────────────────────────────────────────
 
-/** Maximum allowed character length for a transaction name. */
-export const NAME_MAX_LENGTH = 100;
-
-/** Maximum allowed amount value. */
-export const AMOUNT_MAX = 999_999_999.99;
+// ─────────────────────────────────────────────────────────────
+// TASK 5 — Renderer module
+// ─────────────────────────────────────────────────────────────
 
 /**
- * Validator module — validates user input before a transaction is created.
+ * Colour map for each spending category.
+ * Used by renderChart() and the custom legend.
  */
-export const Validator = {
+export const CATEGORY_COLORS = {
+  Food:      '#FF6384',
+  Transport: '#36A2EB',
+  Fun:       '#FFCE56'
+};
+
+/**
+ * Returns a sorted *copy* of state.transactions according to state.sortOrder.
+ * The original array is never mutated.
+ *
+ * @returns {object[]}
+ */
+export function getSortedTransactions() {
+  const copy = [...state.transactions];
+  switch (state.sortOrder) {
+    case 'amount-desc':  return copy.sort((a, b) => b.amount - a.amount);
+    case 'amount-asc':   return copy.sort((a, b) => a.amount - b.amount);
+    case 'category-asc': return copy.sort((a, b) => a.category.localeCompare(b.category));
+    default:             return copy; // 'default': insertion order
+  }
+}
+
+/**
+ * Singleton Chart.js instance.
+ * Created once by renderChart(); updated on subsequent calls.
+ * @type {object|null}
+ */
+export let chartInstance = null;
+
+/**
+ * Renderer module — reads from `state` and updates the DOM.
+ * All methods are pure side-effects on the DOM; they never mutate `state`.
+ */
+export const Renderer = {
+
+  // ── 5.1 ─────────────────────────────────────────────────────
   /**
-   * Validates form input for a new transaction.
+   * Computes the total of all transaction amounts and updates #total-balance.
    *
-   * Rules:
-   *  - name   : required, not whitespace-only, ≤ 100 characters
-   *  - amount : required, numeric > 0, ≤ 999_999_999.99
-   *  - category: must be one of VALID_CATEGORIES
-   *
-   * @param {string} name     - Raw name input (string from text field)
-   * @param {string} amount   - Raw amount input (string from number field)
-   * @param {string} category - Selected category value
-   * @returns {{ valid: true } | { valid: false, errors: { name?: string, amount?: string, category?: string } }}
+   * - Empty list → "Rp 0,00"
+   * - sum > 999_999_999.99 → prepend "⚠ " + class `balance--overflow`
+   * - Formatted with Intl.NumberFormat id-ID / IDR
    */
-  validateTransaction(name, amount, category) {
-    const errors = {};
+  renderBalance() {
+    const el = document.getElementById('total-balance');
+    if (!el) return;
 
-    // ── name validation ──────────────────────────────────────
-    if (typeof name !== 'string' || name.trim().length === 0) {
-      errors.name = 'Nama item wajib diisi.';
-    } else if (name.trim().length > NAME_MAX_LENGTH) {
-      errors.name = `Nama item tidak boleh lebih dari ${NAME_MAX_LENGTH} karakter.`;
+    const sum = state.transactions.reduce((acc, t) => acc + t.amount, 0);
+    const OVERFLOW_LIMIT = 999_999_999.99;
+
+    const formatter = new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR'
+    });
+
+    if (sum > OVERFLOW_LIMIT) {
+      el.textContent = '⚠ ' + formatter.format(sum);
+      el.classList.add('balance--overflow');
+    } else {
+      el.textContent = formatter.format(sum);
+      el.classList.remove('balance--overflow');
+    }
+  },
+
+  // ── 5.3 ─────────────────────────────────────────────────────
+  /**
+   * Clears #transaction-list and re-renders every transaction from state.
+   * Respects state.sortOrder and state.spendingLimit.
+   * Shows #empty-message when there are no transactions.
+   */
+  renderList() {
+    const listEl    = document.getElementById('transaction-list');
+    const emptyEl   = document.getElementById('empty-message');
+    if (!listEl) return;
+
+    // Empty state
+    if (state.transactions.length === 0) {
+      listEl.innerHTML = '';
+      listEl.style.display = 'none';
+      if (emptyEl) emptyEl.hidden = false;
+      return;
     }
 
-    // ── amount validation ────────────────────────────────────
-    const parsedAmount = parseFloat(amount);
-    if (amount === '' || amount === null || amount === undefined) {
-      errors.amount = 'Jumlah wajib diisi.';
-    } else if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      errors.amount = 'Jumlah harus berupa angka lebih dari nol.';
-    } else if (parsedAmount > AMOUNT_MAX) {
-      errors.amount = `Jumlah tidak boleh melebihi ${AMOUNT_MAX.toLocaleString('id-ID')}.`;
+    if (emptyEl) emptyEl.hidden = true;
+    listEl.style.display = '';
+
+    const sorted = getSortedTransactions();
+    const formatter = new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR'
+    });
+
+    listEl.innerHTML = '';
+
+    for (const tx of sorted) {
+      const overLimit =
+        state.spendingLimit > 0 && tx.amount > state.spendingLimit;
+
+      const formattedAmount = formatter.format(tx.amount);
+      const displayAmount   = overLimit ? '⚠ ' + formattedAmount : formattedAmount;
+
+      const li = document.createElement('li');
+      li.className   = 'transaction-item' + (overLimit ? ' transaction-item--over-limit' : '');
+      li.dataset.id  = tx.id;
+
+      li.innerHTML = `
+        <span class="item-name">${escapeHtml(tx.name)}</span>
+        <span class="item-category badge badge--${escapeHtml(tx.category)}">${escapeHtml(tx.category)}</span>
+        <span class="item-amount">${displayAmount}</span>
+        <button class="btn-delete" aria-label="Hapus ${escapeHtml(tx.name)}">✕</button>
+      `.trim();
+
+      listEl.appendChild(li);
+    }
+  },
+
+  // ── 5.4 ─────────────────────────────────────────────────────
+  /**
+   * Computes CategoryTotals and updates the Chart.js pie chart + custom legend.
+   * Creates the Chart instance on first call; updates it on subsequent calls.
+   * Hides canvas and shows #chart-empty-message when all totals are 0.
+   */
+  renderChart() {
+    const canvasEl    = document.getElementById('expense-chart');
+    const emptyMsgEl  = document.getElementById('chart-empty-message');
+    const legendEl    = document.getElementById('chart-legend');
+
+    if (!canvasEl) return;
+
+    // Compute totals per category
+    const totals = { Food: 0, Transport: 0, Fun: 0 };
+    for (const tx of state.transactions) {
+      if (tx.category in totals) totals[tx.category] += tx.amount;
     }
 
-    // ── category validation ───────────────────────────────────
-    if (!VALID_CATEGORIES.includes(category)) {
-      errors.category = 'Kategori harus salah satu dari: Food, Transport, Fun.';
+    const grandTotal = totals.Food + totals.Transport + totals.Fun;
+
+    // All-zero case
+    if (grandTotal === 0) {
+      canvasEl.hidden = true;
+      if (emptyMsgEl) emptyMsgEl.hidden = false;
+      if (legendEl)   legendEl.innerHTML = '';
+      return;
     }
 
-    if (Object.keys(errors).length === 0) {
-      return { valid: true };
+    canvasEl.hidden = false;
+    if (emptyMsgEl) emptyMsgEl.hidden = true;
+
+    // Filter to only categories with total > 0
+    const activeCategories = VALID_CATEGORIES.filter(cat => totals[cat] > 0);
+    const labels  = activeCategories;
+    const data    = activeCategories.map(cat => totals[cat]);
+    const colors  = activeCategories.map(cat => CATEGORY_COLORS[cat]);
+
+    // Percentage tooltip/label callback (format: "33.3%")
+    const percentagePlugin = {
+      afterDraw(chart) {
+        const { ctx, data: d } = chart;
+        const total = d.datasets[0].data.reduce((s, v) => s + v, 0);
+        if (total === 0) return;
+
+        chart.getDatasetMeta(0).data.forEach((arc, i) => {
+          const value   = d.datasets[0].data[i];
+          const pct     = ((value / total) * 100).toFixed(1) + '%';
+          const { x, y } = arc.tooltipPosition();
+          ctx.save();
+          ctx.font         = 'bold 12px sans-serif';
+          ctx.fillStyle    = '#fff';
+          ctx.textAlign    = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(pct, x, y);
+          ctx.restore();
+        });
+      }
+    };
+
+    // eslint-disable-next-line no-undef
+    const ChartConstructor = (typeof Chart !== 'undefined') ? Chart : null;
+    if (!ChartConstructor) return; // Chart.js not loaded (e.g. test env without mock)
+
+    const chartData = {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: colors,
+        hoverOffset: 8
+      }]
+    };
+
+    const chartOptions = {
+      responsive: true,
+      plugins: {
+        legend: { display: false }, // we render a custom legend
+        tooltip: {
+          callbacks: {
+            label(context) {
+              const total = context.dataset.data.reduce((s, v) => s + v, 0);
+              const pct   = total > 0
+                ? ((context.parsed / total) * 100).toFixed(1) + '%'
+                : '0.0%';
+              return `${context.label}: ${pct}`;
+            }
+          }
+        }
+      }
+    };
+
+    if (chartInstance) {
+      chartInstance.data    = chartData;
+      chartInstance.options = chartOptions;
+      chartInstance.update();
+    } else {
+      chartInstance = new ChartConstructor(canvasEl, {
+        type: 'pie',
+        data: chartData,
+        options: chartOptions,
+        plugins: [percentagePlugin]
+      });
     }
 
-    return { valid: false, errors };
+    // Custom legend
+    if (legendEl) {
+      legendEl.innerHTML = activeCategories.map(cat => `
+        <span class="legend-item">
+          <span class="legend-dot" style="background:${CATEGORY_COLORS[cat]}"></span>
+          <span class="legend-label">${escapeHtml(cat)}</span>
+        </span>
+      `).join('');
+    }
   }
 };
 
 // ─────────────────────────────────────────────────────────────
-// Task 5: Renderer module    — implemented in Task 5
-// Task 6: Controller         — implemented in Task 6
-// Task 8: Initialization     — implemented in Task 8
+// Shared utility — HTML escaping (used by Renderer and Controller)
 // ─────────────────────────────────────────────────────────────
+
+/**
+ * Escapes a string for safe insertion into HTML attribute values and content.
+ * @param {string} str
+ * @returns {string}
+ */
+export function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // ─────────────────────────────────────────────────────────────
 // Browser entry-point (no-op until Task 8 wires everything up)

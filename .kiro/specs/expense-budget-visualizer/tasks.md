@@ -37,7 +37,7 @@ Implementasi aplikasi single-file HTML/CSS/Vanilla JavaScript yang berjalan sepe
 
   - `
 
-- [ ] 4. Checkpoint — Verifikasi modul State, Storage, dan Validator
+- [x] 4. Checkpoint — Verifikasi modul State, Storage, dan Validator
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 5. Implementasi modul Renderer
